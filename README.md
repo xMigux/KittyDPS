@@ -16,9 +16,9 @@ talent tree with the following talents:
 
 | Talent | Effect |
 |---|---|
-| **Open Wounds** | Claw deals bonus damage when Rake is active; Rip grants a 15-second buff that further increases Claw damage per combo point spent |
-| **Carnage** | Ferocious Bite has a chance to refresh Rake and Rip and to generate extra combo points |
-| **Blood Frenzy** | Tiger's Fury also applies **Blood Frenzy**: +20% attack speed and +10 energy every 3 seconds for 18 seconds |
+| **Open Wounds** | Claw deals +30% damage per bleed effect active on the target — with Rake and Rip both up, Claw hits for **+60%** bonus damage |
+| **Carnage** | Ferocious Bite has a chance per combo point to refresh Rake and Rip and generate an extra combo point — at 5 CP this is a 100% chance |
+| **Blood Frenzy** | Tiger's Fury increases attack speed by **+20% for 18 seconds** — shifting cancels the buff immediately |
 
 The rotation logic degrades gracefully if some of these talents are not taken —
 toggle off the features you don't use via `/kdps cfg`.
@@ -31,9 +31,14 @@ toggle off the features you don't use via `/kdps cfg`.
   Create a macro with `/kdps dps` and spam it in combat.
 
 - **Open Wounds + Carnage aware**
-  - Keeps **Rake** and **Rip** up for bleed synergy.
+  - Keeps **Rake** and **Rip** up for bleed synergy (Claw deals +60% damage with both active).
   - Uses **Ferocious Bite** aggressively via Carnage to refresh bleeds and generate extra combo points.
   - Optional **max-energy FB mode**: fires FB early when a bleed is about to expire or energy is about to cap.
+
+- **Omen of Clarity aware**
+  When a **Clearcasting** proc is active (next ability costs 0 energy), the addon immediately
+  uses the highest-value free spell: Ferocious Bite (if bleeds are up and combo points are ready)
+  or Shred, rather than waiting for energy to accumulate.
 
 - **Tiger's Fury + Blood Frenzy aware**
   - Uses TF whenever the **Blood Frenzy buff** is not active.
@@ -111,26 +116,29 @@ KittyDPS executes one rotation step per key press — it is not an automation to
 
 Priority order:
 
-1. **Max-energy Ferocious Bite** *(if enabled)*  
-   Fires FB early when Rake or Rip will expire soon (≤ X seconds) or energy is about to cap (≥ Y).  
+1. **Omen of Clarity (Clearcasting)**
+   When active, immediately uses the highest-value free spell: FB (if bleeds + CP ready) or Shred.
+
+2. **Max-energy Ferocious Bite** *(if enabled)*
+   Fires FB early when Rake or Rip will expire soon (≤ X seconds) or energy is about to cap (≥ Y).
    Has higher priority than reapplying bleeds — with 5 CP, a Carnage proc will likely refresh the expiring bleed anyway.
 
-2. **Tiger's Fury**  
+3. **Tiger's Fury**  
    Used whenever the Blood Frenzy buff is not active and energy/position conditions are met.
 
-3. **Rake**  
+4. **Rake**
    Reapplied whenever it falls off.
 
-4. **Rip**  
+5. **Rip**
    Applied or refreshed when it has fewer than the configured seconds remaining.
 
-5. **Ferocious Bite (standard)**  
+6. **Ferocious Bite (standard)**
    Used with both bleeds active at the configured combo point threshold (default 5 on bosses).
 
-6. **Reshift** *(if enabled and Blood Frenzy is NOT active)*  
+7. **Reshift** *(if enabled and Blood Frenzy is NOT active)*
    Fires when energy is very low and mana is sufficient.
 
-7. **Claw filler**  
+8. **Claw filler**
    Default combo point builder when nothing else takes priority.
 
 ### When the target is BLEED IMMUNE
@@ -169,6 +177,7 @@ Open with `/kdps cfg` or via the minimap button.
 | Bleed seconds for urgent FB | 2 | FB fires if Rake or Rip has ≤ this many seconds left |
 | Rip refresh threshold | 3 s | Refresh Rip when this many seconds remain |
 | Min CP for Rip (boss) | 4 | Minimum combo points to cast Rip on bosses |
+| Min CP for Rip (trash) | 3 | Minimum combo points to cast Rip on non-elite targets |
 | Min CP for FB (boss) | 5 | Minimum combo points for Ferocious Bite on bosses |
 | Max energy to trigger Reshift | 20 | Reshift fires when energy ≤ this value |
 | Min mana for Reshift | 231 | Reshift only fires when mana ≥ this value |
@@ -177,15 +186,16 @@ Open with `/kdps cfg` or via the minimap button.
 
 ## Options: Energy Costs Tab
 
-Override the energy cost the addon assumes for each ability.  
-Useful when idols or talents reduce costs below the base values.
+Override the energy cost the addon assumes for each ability.
+Default values already reflect Ferocity 4/5 (−4 to Rake and Claw) and Improved Shred 2/2 (−12 to Shred).
+Adjust further if you use idols or have different talent ranks.
 
-| Ability | Base cost | Example reduction |
+| Ability | Default | Example further reduction |
 |---|---|---|
-| Rake | 35 | — |
-| Claw | 40 | Idol of Ferocity −3, Idol of Brutality −10 |
+| Rake | 31 | Ferocity 4/5 already applied |
+| Claw | 36 | Idol of Ferocity −3, Idol of Brutality −10 |
 | Rip | 30 | — |
-| Shred | 60 | Improved Shred talent |
+| Shred | 48 | Improved Shred 2/2 already applied |
 
 **Ferocious Bite** does not appear here because it consumes all available energy above
 its base cost by design. Control its behaviour via *Min energy for FB* on the Rotation tab.
