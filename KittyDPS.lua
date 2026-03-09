@@ -336,17 +336,13 @@ local function DoDPS()
   local isBoss  = IsBossOrElite()
   local bleedOk = CanBleed()
 
-  -- 4. Faerie Fire (Feral)
-  if cfg.useFaerieFire and not SpellOnCooldown(SPELL_FAERIE_FIRE) then
-    if not TargetHasDebuff(SPELL_FAERIE_FIRE) then
-      SafeCast(SPELL_FAERIE_FIRE)
-      return
-    end
-  end
-
-  -- 5. Omen of Clarity — Clearcasting state: next ability costs 0 energy.
-  -- Use the highest-value spell regardless of current energy.
-  -- Priority: FB (if bleeds + CP ready) > Shred (most expensive normally) > Claw.
+  -- 4. Omen of Clarity — checked before Faerie Fire so that FF does not
+  -- consume the Clearcasting proc (FF is a spell that triggers the GCD).
+  -- Priority: FB (bleeds + CP) > Shred if behind > Rake if missing > Claw.
+  -- Shred beats Rake when behind: higher immediate damage and free.
+  -- Rake beats Claw when not behind and Rake is missing: without an active
+  -- bleed, Claw has no Open Wounds bonus, making a free Rake setup the
+  -- higher-value option.
   if PlayerHasBuff(BUFF_CLEARCASTING) then
     local hasRakeCC = TargetHasDebuff(SPELL_RAKE)
     local hasRipCC  = TargetHasDebuff(SPELL_RIP)
@@ -355,13 +351,24 @@ local function DoDPS()
       SafeCast(SPELL_FEROCIOUS_BITE)
       return
     end
-    -- Shred is the most expensive cat ability — best value for a free cast
     if doclaw == 0 then
       SafeCast(SPELL_SHRED)
+    elseif not hasRakeCC then
+      -- Not behind target and Rake is missing: free Rake > free Claw
+      -- (Claw without a bleed has no Open Wounds bonus).
+      SafeCast(SPELL_RAKE)
     else
       SafeCast(SPELL_CLAW)
     end
     return
+  end
+
+  -- 5. Faerie Fire (Feral)
+  if cfg.useFaerieFire and not SpellOnCooldown(SPELL_FAERIE_FIRE) then
+    if not TargetHasDebuff(SPELL_FAERIE_FIRE) then
+      SafeCast(SPELL_FAERIE_FIRE)
+      return
+    end
   end
 
   -- ==========================================================
