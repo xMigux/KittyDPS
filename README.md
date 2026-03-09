@@ -163,7 +163,6 @@ Open with `/kdps cfg` or via the minimap button.
 | Apply Faerie Fire (Feral) | ON | Maintains Faerie Fire on the target |
 | Use Tiger's Fury | ON | Uses Tiger's Fury via the Blood Frenzy logic |
 | Ferocious Bite on trash | ON | Allows FB on non-elite targets |
-| FB max-energy mode | ON | Uses FB early to avoid energy cap or save expiring bleeds |
 | Detect bleed-immune targets | ON | Switches rotation on Undead/Elemental/Mechanical/Totem |
 | Auto-Reshift | OFF | Uses Reshift when energy is low (never during Blood Frenzy) |
 
@@ -172,9 +171,7 @@ Open with `/kdps cfg` or via the minimap button.
 | Slider | Default | Description |
 |---|---|---|
 | Min energy for FB | 35 | FB only fires at this energy or above |
-| Energy cap trigger for FB | 80 | FB fires if energy ≥ this (max-energy mode) |
-| Bleed seconds for urgent FB | 2 | FB fires if Rake or Rip has ≤ this many seconds left |
-| Rip refresh threshold | 3 s | Refresh Rip when this many seconds remain |
+| Rip refresh threshold | 3 s | Refresh Rip on bosses when this many seconds remain (skipped if CPs are at the FB threshold — Carnage handles the refresh) |
 | Min CP for Rip (boss) | 4 | Minimum combo points to cast Rip on bosses |
 | Min CP for Rip (trash) | 3 | Minimum combo points to cast Rip on non-elite targets |
 | Min CP for FB (boss) | 5 | Minimum combo points for Ferocious Bite on bosses |

@@ -47,6 +47,10 @@ local BUFF_CLEARCASTING    = "Clearcasting"
 -- Error message used by the doclaw state machine to detect that Shred failed
 -- because the player is not behind the target. Adjust for non-English clients.
 local ERR_NOT_BEHIND       = "You must be behind"
+-- Combat log prefixes used by the doclaw state machine to confirm a Shred or
+-- Claw landed. Adjust for non-English clients (same as spell name constants).
+local MSG_SHRED_HIT        = "Your Shred"
+local MSG_CLAW_HIT         = "Your Claw"
 
 -- ============================================================
 -- Base energy costs (vanilla spell cost before any talents)
@@ -64,6 +68,11 @@ local BASE_COSTS = {
 --   2 = one Claw landed after failure, retry Shred next cycle
 local doclaw = 0
 
+-- Shapeshift form indices cached at login — these never change during a
+-- session, so scanning every key press is wasteful.
+local catFormIdx    = nil
+local reshiftFormIdx = nil
+
 -- ============================================================
 -- SavedVariables and defaults
 -- ============================================================
@@ -80,9 +89,6 @@ local defaults = {
   useTigersFury               = true,
   autoDetectBleedImmune       = true,
   usePowershift               = false,
-  fbMaxEnergy                 = true,
-  fbMaxEnergyThreshold        = 80,
-  fbBleedExpireSeconds        = 2,
   powershiftEnergyThreshold   = 20,
   powershiftMana              = 231,
   costRake                    = 31,   -- 35 - 4 (Ferocity 4/5)
@@ -131,10 +137,10 @@ local function GetReshiftIndex()
 end
 
 local function IsCatForm()
-  -- GetShapeshiftFormInfo returns active as 1 or nil, not a boolean
-  local catIdx = GetCatFormIndex()
-  if not catIdx then return false end
-  local _, _, active, _ = GetShapeshiftFormInfo(catIdx)
+  -- GetShapeshiftFormInfo returns active as 1 or nil, not a boolean.
+  -- catFormIdx is cached at login — no form scan needed here.
+  if not catFormIdx then return false end
+  local _, _, active = GetShapeshiftFormInfo(catFormIdx)
   return active == 1 or active == true
 end
 
@@ -175,8 +181,7 @@ local function TargetDebuffRemaining(debuffName)
       if type(expirationTime) == "number" and expirationTime > 0 then
         local now = GetTime()
         if expirationTime > now then
-          local remaining = expirationTime - now
-          return remaining > 0 and remaining or 0
+          return expirationTime - now  -- always > 0, guard already checked above
         end
         return 0
       end
@@ -233,41 +238,14 @@ local function TryPowershift()
   if not cfg.usePowershift then return false end
   if HasBloodFrenzyBuff() then return false end
   if UnitMana("player") < cfg.powershiftMana then return false end
-  local reshiftIdx = GetReshiftIndex()
-  if not reshiftIdx then return false end
+  -- reshiftFormIdx is cached at login — no form scan needed here.
+  if not reshiftFormIdx then return false end
   -- GetShapeshiftFormInfo returns (texture, name, isActive, isCastable).
   -- isCastable is nil when the form is on cooldown or otherwise unavailable.
-  local _, _, _, castable = GetShapeshiftFormInfo(reshiftIdx)
+  local _, _, _, castable = GetShapeshiftFormInfo(reshiftFormIdx)
   if not castable then return false end
-  CastShapeshiftForm(reshiftIdx)
+  CastShapeshiftForm(reshiftFormIdx)
   return true
-end
-
--- ============================================================
--- FB max-energy mode (Carnage synergy)
--- Fires Ferocious Bite early when:
---   combo >= threshold  AND  energy >= minEnergyForFB  AND
---   (a bleed is expiring soon  OR  energy is about to cap)
--- Prioritised above reapplying bleeds because at 5 CP a Carnage
--- proc will likely refresh the expiring bleed anyway.
--- ============================================================
-local function ShouldFBMaxEnergy(combo, energy, isBoss)
-  if not cfg.fbMaxEnergy then return false end
-  local minCP = isBoss and cfg.minComboForBossFB or cfg.minComboForTrashFB
-  if combo < minCP then return false end
-  if energy < cfg.minEnergyForFB then return false end
-
-  -- TargetDebuffRemaining returns nil when the debuff is absent — no need for
-  -- a separate TargetHasDebuff check that would scan the list twice.
-  local rakeRemain = TargetDebuffRemaining(SPELL_RAKE)
-  local ripRemain  = TargetDebuffRemaining(SPELL_RIP)
-
-  local bleedExpiring =
-    (rakeRemain and rakeRemain <= cfg.fbBleedExpireSeconds) or
-    (ripRemain and ripRemain <= cfg.fbBleedExpireSeconds)
-  local energyCapping = energy >= cfg.fbMaxEnergyThreshold
-
-  return bleedExpiring or energyCapping
 end
 
 -- ============================================================
@@ -326,8 +304,7 @@ local function DoDPS()
 
   -- 3. Ensure Cat Form
   if not IsCatForm() then
-    local catIdx = GetCatFormIndex()
-    if catIdx then CastShapeshiftForm(catIdx) else SafeCast(SPELL_CAT_FORM) end
+    if catFormIdx then CastShapeshiftForm(catFormIdx) else SafeCast(SPELL_CAT_FORM) end
     return
   end
 
@@ -381,29 +358,27 @@ local function DoDPS()
   -- ==========================================================
   if bleedOk then
 
-    -- 1. FB max-energy / Carnage priority
-    if ShouldFBMaxEnergy(combo, energy, isBoss) then
-      SafeCast(SPELL_FEROCIOUS_BITE)
-      return
-    end
-
-    -- 2. Tiger's Fury (Blood Frenzy)
+    -- 1. Tiger's Fury (Blood Frenzy)
     if TryTigersFury(energy) then return end
 
-    -- 3. Rake — keep active so Open Wounds bonus is always up
+    -- 2. Rake — keep active so Open Wounds bonus is always up
     local hasRake = TargetHasDebuff(SPELL_RAKE)
     if not hasRake and energy >= CostRake() then
       SafeCast(SPELL_RAKE)
       return
     end
 
-    -- 4. Rip — apply or refresh before it falls off
+    -- 3. Rip — apply or refresh before it falls off.
+    -- On bosses, skip the refresh if combo points are already at the FB
+    -- threshold: FB + Carnage will refresh Rip for free, so recasting it
+    -- here would waste energy and a GCD.
     local hasRip = TargetHasDebuff(SPELL_RIP)
     local ripRemain = TargetDebuffRemaining(SPELL_RIP)
 
     if isBoss then
       if combo >= cfg.minComboForRipBoss and energy >= CostRip() then
-        if not hasRip or (ripRemain and ripRemain < cfg.ripRefreshThreshold) then
+        if not hasRip or (ripRemain and ripRemain < cfg.ripRefreshThreshold
+                          and combo < cfg.minComboForBossFB) then
           SafeCast(SPELL_RIP)
           return
         end
@@ -415,8 +390,9 @@ local function DoDPS()
       end
     end
 
-    -- 5. Ferocious Bite standard — requires both bleeds active
-    -- hasRake and hasRip are safe to reuse: we always return after any SafeCast above
+    -- 4. Ferocious Bite — requires both bleeds active.
+    -- At minComboForBossFB CPs (default 5), Carnage guarantees a bleed
+    -- refresh, so FB is always the right finisher when bleeds are ticking.
     if energy >= cfg.minEnergyForFB and hasRake and hasRip then
       if isBoss and combo >= cfg.minComboForBossFB then
         SafeCast(SPELL_FEROCIOUS_BITE)
@@ -428,12 +404,12 @@ local function DoDPS()
       end
     end
 
-    -- 6. Powershift if energy is low (never during Blood Frenzy)
+    -- 5. Powershift if energy is low (never during Blood Frenzy)
     if energy <= cfg.powershiftEnergyThreshold then
       if TryPowershift() then return end
     end
 
-    -- 7. Claw filler
+    -- 6. Claw filler
     -- With Rake active, Open Wounds bonus applies automatically.
     if energy >= CostClaw() then
       SafeCast(SPELL_CLAW)
@@ -544,7 +520,7 @@ local function CreateOptionsUI()
 
   local root = CreateFrame("Frame", "KittyDPSOptionsRoot", UIParent)
   root:SetWidth(600)
-  root:SetHeight(690)
+  root:SetHeight(580)
   root:SetPoint("CENTER", UIParent, "CENTER")
   root:SetBackdrop({
     bgFile   = "Interface\\DialogFrame\\UI-DialogBox-Background",
@@ -634,18 +610,8 @@ local function CreateOptionsUI()
     function() return cfg.useFerociousBiteOnTrash end,
     function(v) cfg.useFerociousBiteOnTrash = v ; KittyDPSDB.useFerociousBiteOnTrash = v end)
 
-  local secFBMax = tab1:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-  secFBMax:SetPoint("TOPLEFT", cbFBT, "BOTTOMLEFT", 0, -16)
-  secFBMax:SetText("|cffecd226Ferocious Bite — Max Energy (Carnage synergy)")
-
-  local cbFBMax = CreateCB("KittyDPS_CB_FBMax", tab1,
-    "Use FB early when a bleed is expiring or energy is capping",
-    secFBMax, -10,
-    function() return cfg.fbMaxEnergy end,
-    function(v) cfg.fbMaxEnergy = v ; KittyDPSDB.fbMaxEnergy = v end)
-
   local secBld = tab1:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-  secBld:SetPoint("TOPLEFT", cbFBMax, "BOTTOMLEFT", 0, -16)
+  secBld:SetPoint("TOPLEFT", cbFBT, "BOTTOMLEFT", 0, -16)
   secBld:SetText("|cffecd226Bleeds & Immunity")
 
   local cbBI = CreateCB("KittyDPS_CB_BleedImm", tab1,
@@ -676,39 +642,31 @@ local function CreateOptionsUI()
     function() return cfg.minEnergyForFB end,
     function(v) cfg.minEnergyForFB = v ; KittyDPSDB.minEnergyForFB = v end)
 
-  RS("KittyDPS_Sl_FBMaxT","Energy cap trigger for FB",      60, 100, 5, -80,
-    function() return cfg.fbMaxEnergyThreshold end,
-    function(v) cfg.fbMaxEnergyThreshold = v ; KittyDPSDB.fbMaxEnergyThreshold = v end)
-
-  RS("KittyDPS_Sl_FBBld", "Bleed secs left for urgent FB",  1, 5,   1, -135,
-    function() return cfg.fbBleedExpireSeconds end,
-    function(v) cfg.fbBleedExpireSeconds = v ; KittyDPSDB.fbBleedExpireSeconds = v end)
-
-  RS("KittyDPS_Sl_RipT",  "Rip refresh threshold (secs)",   1, 6,   1, -190,
+  RS("KittyDPS_Sl_RipT",  "Rip refresh threshold (secs)",   1, 6,   1, -80,
     function() return cfg.ripRefreshThreshold end,
     function(v) cfg.ripRefreshThreshold = v ; KittyDPSDB.ripRefreshThreshold = v end)
 
-  RS("KittyDPS_Sl_RipCP", "Min CP for Rip (boss)",          3, 5,   1, -245,
+  RS("KittyDPS_Sl_RipCP", "Min CP for Rip (boss)",          3, 5,   1, -135,
     function() return cfg.minComboForRipBoss end,
     function(v) cfg.minComboForRipBoss = v ; KittyDPSDB.minComboForRipBoss = v end)
 
-  RS("KittyDPS_Sl_RipCPT","Min CP for Rip (trash)",         2, 4,   1, -300,
+  RS("KittyDPS_Sl_RipCPT","Min CP for Rip (trash)",         2, 4,   1, -190,
     function() return cfg.minComboForRipTrash end,
     function(v) cfg.minComboForRipTrash = v ; KittyDPSDB.minComboForRipTrash = v end)
 
-  RS("KittyDPS_Sl_FBCP",  "Min CP for FB (boss)",           3, 5,   1, -355,
+  RS("KittyDPS_Sl_FBCP",  "Min CP for FB (boss)",           3, 5,   1, -245,
     function() return cfg.minComboForBossFB end,
     function(v) cfg.minComboForBossFB = v ; KittyDPSDB.minComboForBossFB = v end)
 
-  RS("KittyDPS_Sl_FBCPT", "Min CP for FB (trash)",          2, 4,   1, -410,
+  RS("KittyDPS_Sl_FBCPT", "Min CP for FB (trash)",          2, 4,   1, -300,
     function() return cfg.minComboForTrashFB end,
     function(v) cfg.minComboForTrashFB = v ; KittyDPSDB.minComboForTrashFB = v end)
 
-  RS("KittyDPS_Sl_PSE",   "Max energy to trigger Reshift",  10, 40, 5, -465,
+  RS("KittyDPS_Sl_PSE",   "Max energy to trigger Reshift",  10, 40, 5, -355,
     function() return cfg.powershiftEnergyThreshold end,
     function(v) cfg.powershiftEnergyThreshold = v ; KittyDPSDB.powershiftEnergyThreshold = v end)
 
-  RS("KittyDPS_Sl_PSM",   "Min mana for Reshift",           100, 500, 10, -520,
+  RS("KittyDPS_Sl_PSM",   "Min mana for Reshift",           100, 500, 10, -410,
     function() return cfg.powershiftMana end,
     function(v) cfg.powershiftMana = v ; KittyDPSDB.powershiftMana = v end)
 
@@ -857,7 +815,6 @@ local function PrintStatus()
   KPrint("  Faerie Fire:          " .. Flag(cfg.useFaerieFire))
   KPrint("  Tiger's Fury:         " .. Flag(cfg.useTigersFury))
   KPrint("  FB on trash:          " .. Flag(cfg.useFerociousBiteOnTrash))
-  KPrint("  FB max-energy mode:   " .. Flag(cfg.fbMaxEnergy))
   KPrint("  Bleed immune detect:  " .. Flag(cfg.autoDetectBleedImmune))
   KPrint("  Powershift (Reshift): " .. Flag(cfg.usePowershift))
 end
@@ -884,6 +841,8 @@ eventFrame:SetScript("OnEvent", function()
   if event == "PLAYER_ENTERING_WORLD" then
     KittyDPSDB = CopyDefaults(defaults, KittyDPSDB or {})
     cfg = KittyDPSDB
+    catFormIdx    = GetCatFormIndex()
+    reshiftFormIdx = GetReshiftIndex()
     CreateMinimapButton()
     if not loaded then
       PrintStatus()
@@ -900,9 +859,9 @@ eventFrame:SetScript("OnEvent", function()
     end
   elseif event == "CHAT_MSG_SPELL_SELF_DAMAGE" then
     if arg1 then
-      if strfind(arg1, "Your Shred") then
+      if strfind(arg1, MSG_SHRED_HIT) then
         doclaw = 0
-      elseif strfind(arg1, "Your Claw") then
+      elseif strfind(arg1, MSG_CLAW_HIT) then
         if doclaw == 1 then
           doclaw = 2
         elseif doclaw == 2 then
@@ -940,7 +899,6 @@ SlashCmdList["KITTYDPS"] = function(msg)
   KPrint("  Faerie Fire:          " .. Flag(cfg.useFaerieFire))
   KPrint("  Tiger's Fury:         " .. Flag(cfg.useTigersFury))
   KPrint("  FB on trash:          " .. Flag(cfg.useFerociousBiteOnTrash))
-  KPrint("  FB max-energy mode:   " .. Flag(cfg.fbMaxEnergy))
   KPrint("  Bleed immune detect:  " .. Flag(cfg.autoDetectBleedImmune))
   KPrint("  Powershift (Reshift): " .. Flag(cfg.usePowershift))
   KPrint("|cffffa500──────────────────────────────")
