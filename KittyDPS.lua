@@ -44,6 +44,9 @@ local BUFF_BLOOD_FRENZY    = "Blood Frenzy"
 -- named "Tiger's Fury" rather than "Blood Frenzy" in-game. If powershift / TF
 -- guards never trigger, change this constant to "Tiger's Fury" and test.
 local BUFF_CLEARCASTING    = "Clearcasting"
+-- Error message used by the doclaw state machine to detect that Shred failed
+-- because the player is not behind the target. Adjust for non-English clients.
+local ERR_NOT_BEHIND       = "You must be behind"
 
 -- ============================================================
 -- Base energy costs (vanilla spell cost before any talents)
@@ -231,15 +234,13 @@ local function TryPowershift()
   if HasBloodFrenzyBuff() then return false end
   if UnitMana("player") < cfg.powershiftMana then return false end
   local reshiftIdx = GetReshiftIndex()
-  if reshiftIdx then
-    CastShapeshiftForm(reshiftIdx)
-    return true
-  end
-  if not SpellOnCooldown(SPELL_RESHIFT) then
-    SafeCast(SPELL_RESHIFT)
-    return true
-  end
-  return false
+  if not reshiftIdx then return false end
+  -- GetShapeshiftFormInfo returns (texture, name, isActive, isCastable).
+  -- isCastable is nil when the form is on cooldown or otherwise unavailable.
+  local _, _, _, castable = GetShapeshiftFormInfo(reshiftIdx)
+  if not castable then return false end
+  CastShapeshiftForm(reshiftIdx)
+  return true
 end
 
 -- ============================================================
@@ -256,15 +257,10 @@ local function ShouldFBMaxEnergy(combo, energy, isBoss)
   if combo < minCP then return false end
   if energy < cfg.minEnergyForFB then return false end
 
-  local rakeRemain = nil
-  local ripRemain = nil
-
-  if TargetHasDebuff(SPELL_RAKE) then
-    rakeRemain = TargetDebuffRemaining(SPELL_RAKE)
-  end
-  if TargetHasDebuff(SPELL_RIP) then
-    ripRemain = TargetDebuffRemaining(SPELL_RIP)
-  end
+  -- TargetDebuffRemaining returns nil when the debuff is absent — no need for
+  -- a separate TargetHasDebuff check that would scan the list twice.
+  local rakeRemain = TargetDebuffRemaining(SPELL_RAKE)
+  local ripRemain  = TargetDebuffRemaining(SPELL_RIP)
 
   local bleedExpiring =
     (rakeRemain and rakeRemain <= cfg.fbBleedExpireSeconds) or
@@ -541,7 +537,7 @@ local function CreateOptionsUI()
 
   local root = CreateFrame("Frame", "KittyDPSOptionsRoot", UIParent)
   root:SetWidth(600)
-  root:SetHeight(635)
+  root:SetHeight(690)
   root:SetPoint("CENTER", UIParent, "CENTER")
   root:SetBackdrop({
     bgFile   = "Interface\\DialogFrame\\UI-DialogBox-Background",
@@ -697,11 +693,15 @@ local function CreateOptionsUI()
     function() return cfg.minComboForBossFB end,
     function(v) cfg.minComboForBossFB = v ; KittyDPSDB.minComboForBossFB = v end)
 
-  RS("KittyDPS_Sl_PSE",   "Max energy to trigger Reshift",  10, 40, 5, -410,
+  RS("KittyDPS_Sl_FBCPT", "Min CP for FB (trash)",          2, 4,   1, -410,
+    function() return cfg.minComboForTrashFB end,
+    function(v) cfg.minComboForTrashFB = v ; KittyDPSDB.minComboForTrashFB = v end)
+
+  RS("KittyDPS_Sl_PSE",   "Max energy to trigger Reshift",  10, 40, 5, -465,
     function() return cfg.powershiftEnergyThreshold end,
     function(v) cfg.powershiftEnergyThreshold = v ; KittyDPSDB.powershiftEnergyThreshold = v end)
 
-  RS("KittyDPS_Sl_PSM",   "Min mana for Reshift",           100, 500, 10, -465,
+  RS("KittyDPS_Sl_PSM",   "Min mana for Reshift",           100, 500, 10, -520,
     function() return cfg.powershiftMana end,
     function(v) cfg.powershiftMana = v ; KittyDPSDB.powershiftMana = v end)
 
@@ -862,6 +862,10 @@ end
 -- PLAYER_ENTERING_WORLD fires after SavedVariables are loaded
 -- and is the standard init event for 1.12 addons.
 -- ============================================================
+-- Prevents PrintStatus from firing on every zone change.
+-- PLAYER_ENTERING_WORLD fires on each load screen, not only on first login.
+local loaded = false
+
 local eventFrame = CreateFrame("Frame", "KittyDPS_EventFrame")
 eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
 eventFrame:RegisterEvent("PLAYER_TARGET_CHANGED")
@@ -874,14 +878,17 @@ eventFrame:SetScript("OnEvent", function()
     KittyDPSDB = CopyDefaults(defaults, KittyDPSDB or {})
     cfg = KittyDPSDB
     CreateMinimapButton()
-    PrintStatus()
+    if not loaded then
+      PrintStatus()
+      loaded = true
+    end
   elseif event == "PLAYER_TARGET_CHANGED" then
     doclaw = 0
   elseif event == "PLAYER_REGEN_ENABLED" then
     doclaw = 0
   elseif event == "UI_ERROR_MESSAGE" then
     -- Shred failed: player is not behind target
-    if arg1 and strfind(arg1, "You must be behind") then
+    if arg1 and strfind(arg1, ERR_NOT_BEHIND) then
       if doclaw == 0 then doclaw = 1 end
     end
   elseif event == "CHAT_MSG_SPELL_SELF_DAMAGE" then

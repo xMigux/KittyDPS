@@ -68,7 +68,6 @@ toggle off the features you don't use via `/kdps cfg`.
 
 - **Client version:** Vanilla 1.12 (TOC 11200).
 - **Class / Spec:** Druid — Feral cat DPS.
-- **Recommended talents:** Open Wounds, Carnage, Blood Frenzy 2/2.
 
 ---
 
@@ -179,6 +178,7 @@ Open with `/kdps cfg` or via the minimap button.
 | Min CP for Rip (boss) | 4 | Minimum combo points to cast Rip on bosses |
 | Min CP for Rip (trash) | 3 | Minimum combo points to cast Rip on non-elite targets |
 | Min CP for FB (boss) | 5 | Minimum combo points for Ferocious Bite on bosses |
+| Min CP for FB (trash) | 3 | Minimum combo points for Ferocious Bite on non-elite targets |
 | Max energy to trigger Reshift | 20 | Reshift fires when energy ≤ this value |
 | Min mana for Reshift | 231 | Reshift only fires when mana ≥ this value |
 
@@ -226,6 +226,7 @@ local SPELL_TIGERS_FURY    = "Tiger's Fury"
 local SPELL_FAERIE_FIRE    = "Faerie Fire (Feral)"
 local SPELL_RESHIFT        = "Reshift"
 local BUFF_BLOOD_FRENZY    = "Blood Frenzy"
+local ERR_NOT_BEHIND       = "You must be behind"
 ```
 
 ---
