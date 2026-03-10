@@ -472,7 +472,13 @@ local function DoDPS()
     return
   end
 
-  -- 5. Faerie Fire (Feral) — apply when not already on target.
+  -- 5. Tiger's Fury pre-pull — must fire before Faerie Fire because FF
+  -- triggers combat, after which the in-combat TF logic takes over.
+  if not UnitAffectingCombat("player") then
+    if TryTigersFury(energy) then return end
+  end
+
+  -- 6. Faerie Fire (Feral) — apply when not already on target.
   -- Primary check: UnitDebuff texture (reapplies on target switch automatically).
   -- Fallback: SpellOnCooldown in case the texture name doesn't match this server.
   if cfg.useFaerieFire then
