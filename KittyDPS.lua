@@ -47,10 +47,26 @@ local BUFF_CLEARCASTING    = "Clearcasting"
 -- Error message used by the doclaw state machine to detect that Shred failed
 -- because the player is not behind the target. Adjust for non-English clients.
 local ERR_NOT_BEHIND       = "You must be behind"
--- Combat log prefixes used by the doclaw state machine to confirm a Shred or
--- Claw landed. Adjust for non-English clients (same as spell name constants).
+-- Combat log prefixes for spell hit detection. Adjust for non-English clients.
 local MSG_SHRED_HIT        = "Your Shred"
 local MSG_CLAW_HIT         = "Your Claw"
+local MSG_RAKE_HIT         = "Your Rake"
+local MSG_RIP_HIT          = "Your Rip"
+local MSG_FF_HIT           = "Your Faerie Fire"
+
+-- In vanilla 1.12, UnitBuff/UnitDebuff returns icon texture as first value,
+-- not the spell name. Player buffs are detected via GetPlayerBuff +
+-- GetPlayerBuffTexture (HolyShift approach). These partial texture strings
+-- are matched with strfind against the full icon path.
+-- If a buff is never detected, verify the icon name in-game and update here.
+local TEXTURE_BLOOD_FRENZY  = "Ability_Mount_JungleTiger"
+local TEXTURE_CLEARCASTING  = "Spell_Shadow_ManaBurn"
+
+-- Duration constants (seconds) for time-based bleed / debuff tracking.
+-- Rake: 3 ticks × 3 s = 9 s. Rip: computed per combo points (2 + cp*2).
+-- Faerie Fire (Feral): 40 s.
+local RAKE_DURATION = 9
+local FF_DURATION   = 40
 
 -- ============================================================
 -- Base energy costs (vanilla spell cost before any talents)
@@ -72,6 +88,13 @@ local doclaw = 0
 -- session, so scanning every key press is wasteful.
 local catFormIdx    = nil
 local reshiftFormIdx = nil
+
+-- Time-based bleed / debuff tracking.
+-- Populated from CHAT_MSG_SPELL_SELF_DAMAGE and _PERIODIC events.
+-- Reset on PLAYER_TARGET_CHANGED so stale data never bleeds across targets.
+local bleedExpire = { Rake = 0, Rip = 0 }
+local lastRipCombo = 0   -- combo points used when Rip was last cast
+local ffExpireTime = 0   -- when Faerie Fire debuff expires on current target
 
 -- Spell slot cache: maps spell name → spellbook slot number.
 -- Populated lazily on first lookup; spells never change slots mid-session.
@@ -180,32 +203,36 @@ local function PlayerEnergy()
   return UnitMana("player")
 end
 
--- UnitBuff/UnitDebuff return order differs between vanilla 1.12 and Classic+:
---   Vanilla:  icon, name, rank, count, debuffType  (5 values)
---   Classic+: name, rank, icon, count, debuffType, duration, expirationTime (7 values, TBC-style)
--- To handle both, we check positions 1 AND 2 for the spell name.
--- expirationTime is always at position 7 in the extended (Classic+) format.
+-- Player buff detection using GetPlayerBuff / GetPlayerBuffTexture (vanilla
+-- 1.12 native API, used by HolyShift). GetPlayerBuff(i) returns the buff
+-- slot index (-1 when no more buffs). GetPlayerBuffTexture(idx) returns the
+-- full icon path; we match against TEXTURE_* partial strings via strfind.
 local function PlayerHasBuff(buffName)
-  local i = 1
+  local texture = (buffName == BUFF_BLOOD_FRENZY and TEXTURE_BLOOD_FRENZY)
+               or (buffName == BUFF_CLEARCASTING  and TEXTURE_CLEARCASTING)
+  if not texture then return false end
+  local i = 0
   while true do
-    local a, b = UnitBuff("player", i)
-    if a == nil then break end
-    if a == buffName or b == buffName then return true end
+    local idx = GetPlayerBuff(i)
+    if idx == -1 then break end
+    local t = GetPlayerBuffTexture(idx)
+    if t and strfind(t, texture) then return true end
     i = i + 1
   end
   return false
 end
 
 local function PlayerBuffRemaining(buffName)
-  local i = 1
+  local texture = (buffName == BUFF_BLOOD_FRENZY and TEXTURE_BLOOD_FRENZY)
+  if not texture then return nil end
+  local i = 0
   while true do
-    local a, b, c, d, e, f, g = UnitBuff("player", i)
-    if a == nil then break end
-    if a == buffName or b == buffName then
-      if type(g) == "number" and g > 0 then
-        local now = GetTime()
-        if g > now then return g - now end
-        return 0
+    local idx = GetPlayerBuff(i)
+    if idx == -1 then break end
+    local t = GetPlayerBuffTexture(idx)
+    if t and strfind(t, texture) then
+      if GetPlayerBuffTimeLeft then
+        return GetPlayerBuffTimeLeft(idx)
       end
       return nil
     end
@@ -386,8 +413,9 @@ local function DoDPS()
   -- bleed, Claw has no Open Wounds bonus, making a free Rake setup the
   -- higher-value option.
   if PlayerHasBuff(BUFF_CLEARCASTING) then
-    local hasRakeCC = TargetHasDebuff(SPELL_RAKE)
-    local hasRipCC  = TargetHasDebuff(SPELL_RIP)
+    local now       = GetTime()
+    local hasRakeCC = now < bleedExpire.Rake
+    local hasRipCC  = now < bleedExpire.Rip
     local minCP = isBoss and cfg.minComboForBossFB or cfg.minComboForTrashFB
     if hasRakeCC and hasRipCC and combo >= minCP then
       SafeCast(SPELL_FEROCIOUS_BITE)
@@ -405,9 +433,9 @@ local function DoDPS()
     return
   end
 
-  -- 5. Faerie Fire (Feral)
+  -- 5. Faerie Fire (Feral) — time-based: apply when our tracked debuff expired.
   if cfg.useFaerieFire and not SpellOnCooldown(SPELL_FAERIE_FIRE) then
-    if not TargetHasDebuff(SPELL_FAERIE_FIRE) then
+    if GetTime() >= ffExpireTime then
       SafeCast(SPELL_FAERIE_FIRE)
       return
     end
@@ -427,7 +455,8 @@ local function DoDPS()
     if TryTigersFury(energy) then return end
 
     -- 2. Rake — keep active so Open Wounds bonus is always up
-    local hasRake = TargetHasDebuff(SPELL_RAKE)
+    local now     = GetTime()
+    local hasRake = now < bleedExpire.Rake
     if not hasRake and energy >= CostRake() then
       SafeCast(SPELL_RAKE)
       return
@@ -437,19 +466,21 @@ local function DoDPS()
     -- On bosses, skip the refresh if combo points are already at the FB
     -- threshold: FB + Carnage will refresh Rip for free, so recasting it
     -- here would waste energy and a GCD.
-    local hasRip = TargetHasDebuff(SPELL_RIP)
-    local ripRemain = TargetDebuffRemaining(SPELL_RIP)
+    local hasRip    = now < bleedExpire.Rip
+    local ripRemain = math.max(0, bleedExpire.Rip - now)
 
     if isBoss then
       if combo >= cfg.minComboForRipBoss and energy >= CostRip() then
-        if not hasRip or (ripRemain and ripRemain < cfg.ripRefreshThreshold
+        if not hasRip or (ripRemain < cfg.ripRefreshThreshold
                           and combo < cfg.minComboForBossFB) then
+          lastRipCombo = combo
           SafeCast(SPELL_RIP)
           return
         end
       end
     else
       if combo >= cfg.minComboForRipTrash and not hasRip and energy >= CostRip() then
+        lastRipCombo = combo
         SafeCast(SPELL_RIP)
         return
       end
@@ -905,6 +936,8 @@ eventFrame:RegisterEvent("PLAYER_TARGET_CHANGED")
 eventFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
 eventFrame:RegisterEvent("UI_ERROR_MESSAGE")
 eventFrame:RegisterEvent("CHAT_MSG_SPELL_SELF_DAMAGE")
+eventFrame:RegisterEvent("CHAT_MSG_SPELL_PERIODIC_SELF_DAMAGE")
+eventFrame:RegisterEvent("CHAT_MSG_SPELL_AURA_GONE_OTHER")
 
 eventFrame:SetScript("OnEvent", function()
   if event == "PLAYER_ENTERING_WORLD" then
@@ -919,6 +952,9 @@ eventFrame:SetScript("OnEvent", function()
     end
   elseif event == "PLAYER_TARGET_CHANGED" then
     doclaw = 0
+    bleedExpire.Rake = 0
+    bleedExpire.Rip  = 0
+    ffExpireTime     = 0
   elseif event == "PLAYER_REGEN_ENABLED" then
     doclaw = 0
   elseif event == "UI_ERROR_MESSAGE" then
@@ -936,6 +972,31 @@ eventFrame:SetScript("OnEvent", function()
         elseif doclaw == 2 then
           doclaw = 0
         end
+      elseif strfind(arg1, MSG_RAKE_HIT) then
+        bleedExpire.Rake = GetTime() + RAKE_DURATION
+      elseif strfind(arg1, MSG_RIP_HIT) then
+        bleedExpire.Rip = GetTime() + (2 + lastRipCombo * 2)
+      elseif strfind(arg1, MSG_FF_HIT) then
+        ffExpireTime = GetTime() + FF_DURATION
+      end
+    end
+  elseif event == "CHAT_MSG_SPELL_AURA_GONE_OTHER" then
+    -- "Rake fades from X." / "Rip fades from X." — bleed fell off, reset timer.
+    if arg1 then
+      if strfind(arg1, "Rake") then
+        bleedExpire.Rake = 0
+      elseif strfind(arg1, "Rip") then
+        bleedExpire.Rip = 0
+      end
+    end
+  elseif event == "CHAT_MSG_SPELL_PERIODIC_SELF_DAMAGE" then
+    -- DoT ticks confirm the bleed is still active; extend our timer
+    -- by one extra tick interval so we never see a false "expired" gap.
+    if arg1 then
+      if strfind(arg1, "Rake") then
+        bleedExpire.Rake = math.max(bleedExpire.Rake, GetTime() + 3.5)
+      elseif strfind(arg1, "Rip") then
+        bleedExpire.Rip = math.max(bleedExpire.Rip, GetTime() + 3)
       end
     end
   end
