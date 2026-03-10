@@ -73,6 +73,27 @@ local doclaw = 0
 local catFormIdx    = nil
 local reshiftFormIdx = nil
 
+-- Spell slot cache: maps spell name → spellbook slot number.
+-- Populated lazily on first lookup; spells never change slots mid-session.
+local spellSlotCache = {}
+
+local function FindSpellSlot(name)
+  if spellSlotCache[name] then return spellSlotCache[name] end
+  local tabs = GetNumSpellTabs()
+  for t = 1, tabs do
+    local _, _, offset, numSlots = GetSpellTabInfo(t)
+    for i = 1, numSlots do
+      local slot = offset + i
+      local sName = GetSpellName(slot, "spell")
+      if sName == name then
+        spellSlotCache[name] = slot
+        return slot
+      end
+    end
+  end
+  return nil
+end
+
 -- ============================================================
 -- SavedVariables and defaults
 -- ============================================================
@@ -193,7 +214,9 @@ local function TargetDebuffRemaining(debuffName)
 end
 
 local function SpellOnCooldown(spellName)
-  local start, duration = GetSpellCooldown(spellName)
+  local slot = FindSpellSlot(spellName)
+  if not slot then return false end
+  local start, duration = GetSpellCooldown(slot, "spell")
   if not start or start == 0 then return false end
   if duration == 0 then return false end
   return (start + duration - GetTime()) > 0.1
@@ -477,7 +500,7 @@ local function CreateSlider(name, parent, label, minVal, maxVal, step, x, y, get
 end
 
 local function CreateCB(name, parent, label, anchorFrame, offsetY, getter, setter)
-  local cb = CreateFrame("CheckButton", name, parent, "ChatConfigCheckButtonTemplate")
+  local cb = CreateFrame("CheckButton", name, parent, "UICheckButtonTemplate")
   if anchorFrame then
     cb:SetPoint("TOPLEFT", anchorFrame, "BOTTOMLEFT", 0, offsetY or -8)
   else
