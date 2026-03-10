@@ -520,8 +520,9 @@ local function DoDPS()
       end
     end
 
-    -- 3. Rake — keep active so Open Wounds bonus is always up
-    if not hasRake and energy >= CostRake() then
+    -- 3. Rake — keep active, but skip at max CP: at 5 CP use Rip or FB
+    -- instead (Carnage refreshes Rake on the next FB).
+    if not hasRake and combo < cfg.minComboForBossFB and energy >= CostRake() then
       SafeCast(SPELL_RAKE)
       return
     end
@@ -992,13 +993,6 @@ eventFrame:SetScript("OnEvent", function()
     cfg = KittyDPSDB
     catFormIdx     = GetCatFormIndex()
     reshiftFormIdx = GetReshiftIndex()
-    -- Auto-detect Faerie Fire spell name from spellbook (handles server
-    -- naming differences: "Faerie Fire (Feral)", "Feral Faerie Fire", etc.)
-    local ffName, ffSlot = FindSpellByPartialName("Faerie Fire")
-    if ffName then
-      SPELL_FAERIE_FIRE = ffName
-      spellSlotCache[ffName] = ffSlot
-    end
     CreateMinimapButton()
     if not loaded then
       PrintStatus()
