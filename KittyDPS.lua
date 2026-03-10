@@ -180,41 +180,61 @@ local function PlayerEnergy()
   return UnitMana("player")
 end
 
+-- UnitBuff/UnitDebuff return order differs between vanilla 1.12 and Classic+:
+--   Vanilla:  icon, name, rank, count, debuffType  (5 values)
+--   Classic+: name, rank, icon, count, debuffType, duration, expirationTime (7 values, TBC-style)
+-- To handle both, we check positions 1 AND 2 for the spell name.
+-- expirationTime is always at position 7 in the extended (Classic+) format.
 local function PlayerHasBuff(buffName)
   local i = 1
   while true do
-    local name = UnitBuff("player", i)
-    if not name then break end
-    if name == buffName then return true end
+    local a, b = UnitBuff("player", i)
+    if a == nil then break end
+    if a == buffName or b == buffName then return true end
     i = i + 1
   end
   return false
 end
 
+local function PlayerBuffRemaining(buffName)
+  local i = 1
+  while true do
+    local a, b, c, d, e, f, g = UnitBuff("player", i)
+    if a == nil then break end
+    if a == buffName or b == buffName then
+      if type(g) == "number" and g > 0 then
+        local now = GetTime()
+        if g > now then return g - now end
+        return 0
+      end
+      return nil
+    end
+    i = i + 1
+  end
+  return nil
+end
+
 local function TargetHasDebuff(debuffName)
   local i = 1
   while true do
-    local name = UnitDebuff("target", i)
-    if not name then break end
-    if name == debuffName then return true end
+    local a, b = UnitDebuff("target", i)
+    if a == nil then break end
+    if a == debuffName or b == debuffName then return true end
     i = i + 1
   end
   return false
 end
 
 local function TargetDebuffRemaining(debuffName)
-  -- expirationTime is available in 1.12 for debuffs cast by the player.
-  -- Guard against nil for debuffs cast by others.
   local i = 1
   while true do
-    local name, _, _, _, _, _, expirationTime = UnitDebuff("target", i)
-    if not name then break end
-    if name == debuffName then
-      if type(expirationTime) == "number" and expirationTime > 0 then
+    local a, b, c, d, e, f, g = UnitDebuff("target", i)
+    if a == nil then break end
+    if a == debuffName or b == debuffName then
+      -- expirationTime is at position 7 in both vanilla-extended and Classic+ formats
+      if type(g) == "number" and g > 0 then
         local now = GetTime()
-        if expirationTime > now then
-          return expirationTime - now  -- always > 0, guard already checked above
-        end
+        if g > now then return g - now end
         return 0
       end
       return nil
@@ -297,7 +317,18 @@ end
 local function TryTigersFury(energy)
   if not cfg.useTigersFury then return false end
   if SpellOnCooldown(SPELL_TIGERS_FURY) then return false end
-  if HasBloodFrenzyBuff() then return false end
+
+  -- Block if Blood Frenzy buff is active with more than 5 s remaining.
+  -- Allow re-cast when the buff is about to fall off (<=5 s) so there is
+  -- no gap in the attack-speed bonus.
+  local bfRemain = PlayerBuffRemaining(BUFF_BLOOD_FRENZY)
+  if bfRemain ~= nil and bfRemain > 5 then return false end
+
+  -- Out of combat: always buff up pre-pull regardless of energy.
+  if not UnitAffectingCombat("player") then
+    SafeCast(SPELL_TIGERS_FURY)
+    return true
+  end
 
   local inMeleeRange = CheckInteractDistance("target", 2)
 
@@ -307,7 +338,7 @@ local function TryTigersFury(energy)
       return true
     end
   else
-    -- Out of melee: use TF pre-pull but only if not already energy-capped
+    -- Chasing target in combat: use TF if energy is not already high.
     if energy < 80 then
       SafeCast(SPELL_TIGERS_FURY)
       return true
@@ -443,8 +474,9 @@ local function DoDPS()
       if TryPowershift() then return end
     end
 
-    -- 6. Claw filler
-    -- With Rake active, Open Wounds bonus applies automatically.
+    -- 6. Claw filler — always Claw for bleed-susceptible targets.
+    -- With both bleeds active, Open Wounds gives Claw +60% damage,
+    -- making it the superior sustained filler over Shred here.
     if energy >= CostClaw() then
       SafeCast(SPELL_CLAW)
     end
