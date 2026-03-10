@@ -37,6 +37,9 @@ local SPELL_CLAW           = "Claw"
 local SPELL_SHRED          = "Shred"
 local SPELL_FEROCIOUS_BITE = "Ferocious Bite"
 local SPELL_TIGERS_FURY    = "Tiger's Fury"
+-- Populated at PLAYER_ENTERING_WORLD by scanning the spellbook for any
+-- spell whose name contains "Faerie Fire". Handles server-specific naming
+-- ("Faerie Fire (Feral)", "Feral Faerie Fire", etc.) automatically.
 local SPELL_FAERIE_FIRE    = "Faerie Fire (Feral)"
 local SPELL_RESHIFT        = "Reshift"
 local BUFF_BLOOD_FRENZY    = "Blood Frenzy"
@@ -95,10 +98,34 @@ local reshiftFormIdx = nil
 -- Reset on PLAYER_TARGET_CHANGED so stale data never bleeds across targets.
 local bleedExpire = { Rake = 0, Rip = 0 }
 local lastRipCombo = 0   -- combo points used when Rip was last cast
+-- FF fallback timer: set to GetTime()+FF_DURATION on cast, reset on target change.
+-- Guards against SpellOnCooldown or texture check not working on this server.
+local ffCooldownUntil = 0
+local FF_DURATION     = 40
 
 -- Spell slot cache: maps spell name → spellbook slot number.
 -- Populated lazily on first lookup; spells never change slots mid-session.
 local spellSlotCache = {}
+
+-- Scans the spellbook for the first spell whose name contains partialName.
+-- Returns spellName, slotNumber or nil, nil if not found.
+local function FindSpellByPartialName(partialName)
+  local tabs = GetNumSpellTabs()
+  for t = 1, tabs do
+    local _, _, offset, numSlots = GetSpellTabInfo(t)
+    for i = 1, numSlots do
+      local slot = offset + i
+      local sName, sRank = GetSpellName(slot, "spell")
+      if sName and strfind(sName, partialName) then
+        -- CastSpellByName needs the rank suffix on some servers.
+        -- Build "SpellName(Rank X)" if rank is available, else just name.
+        local fullName = (sRank and sRank ~= "") and (sName .. "(" .. sRank .. ")") or sName
+        return fullName, slot
+      end
+    end
+  end
+  return nil, nil
+end
 
 local function FindSpellSlot(name)
   if spellSlotCache[name] then return spellSlotCache[name] end
@@ -452,8 +479,9 @@ local function DoDPS()
   if cfg.useFaerieFire then
     local now = GetTime()
     local ffOnTarget = TargetHasDebuffTexture(TEXTURE_FAERIE_FIRE)
-    if not ffOnTarget and not SpellOnCooldown(SPELL_FAERIE_FIRE) then
+    if not ffOnTarget and now >= ffCooldownUntil and not SpellOnCooldown(SPELL_FAERIE_FIRE) then
       SafeCast(SPELL_FAERIE_FIRE)
+      ffCooldownUntil = now + FF_DURATION
       return
     end
   end
@@ -471,23 +499,38 @@ local function DoDPS()
     -- 1. Tiger's Fury (Blood Frenzy)
     if TryTigersFury(energy) then return end
 
-    -- 2. Rake — keep active so Open Wounds bonus is always up
     local now     = GetTime()
     local hasRake = TargetHasDebuffTexture(TEXTURE_RAKE)
-    if not hasRake and energy >= CostRake() then
-      SafeCast(SPELL_RAKE)
-      return
-    end
-
-    -- 3. Rip — apply or refresh before it falls off.
-    -- On bosses, skip the refresh if combo points are already at the FB
-    -- threshold: FB + Carnage will refresh Rip for free, so recasting it
-    -- here would waste energy and a GCD.
     -- Rip presence: live texture check. ripRemain uses time-based estimate
     -- (populated from PERIODIC ticks since Rip has no initial damage hit).
     local hasRip    = TargetHasDebuffTexture(TEXTURE_RIP)
     local ripRemain = math.max(0, bleedExpire.Rip - now)
 
+    -- 2. Ferocious Bite — prioritised BEFORE Rake when Rip is active and
+    -- CP is at the finisher threshold. At 5 CP Carnage guarantees a refresh
+    -- of both bleeds, so spending CPs here is always correct even if Rake
+    -- has just fallen off. Rake is re-applied on the next press.
+    if energy >= cfg.minEnergyForFB and hasRip then
+      if isBoss and combo >= cfg.minComboForBossFB then
+        SafeCast(SPELL_FEROCIOUS_BITE)
+        return
+      elseif not isBoss and cfg.useFerociousBiteOnTrash
+             and combo >= cfg.minComboForTrashFB then
+        SafeCast(SPELL_FEROCIOUS_BITE)
+        return
+      end
+    end
+
+    -- 3. Rake — keep active so Open Wounds bonus is always up
+    if not hasRake and energy >= CostRake() then
+      SafeCast(SPELL_RAKE)
+      return
+    end
+
+    -- 4. Rip — apply or refresh before it falls off.
+    -- On bosses, skip the refresh if combo points are already at the FB
+    -- threshold: FB + Carnage will refresh Rip for free, so recasting it
+    -- here would waste energy and a GCD.
     if isBoss then
       if combo >= cfg.minComboForRipBoss and energy >= CostRip() then
         if not hasRip or (ripRemain < cfg.ripRefreshThreshold
@@ -501,20 +544,6 @@ local function DoDPS()
       if combo >= cfg.minComboForRipTrash and not hasRip and energy >= CostRip() then
         lastRipCombo = combo
         SafeCast(SPELL_RIP)
-        return
-      end
-    end
-
-    -- 4. Ferocious Bite — requires both bleeds active.
-    -- At minComboForBossFB CPs (default 5), Carnage guarantees a bleed
-    -- refresh, so FB is always the right finisher when bleeds are ticking.
-    if energy >= cfg.minEnergyForFB and hasRake and hasRip then
-      if isBoss and combo >= cfg.minComboForBossFB then
-        SafeCast(SPELL_FEROCIOUS_BITE)
-        return
-      elseif not isBoss and cfg.useFerociousBiteOnTrash
-             and combo >= cfg.minComboForTrashFB then
-        SafeCast(SPELL_FEROCIOUS_BITE)
         return
       end
     end
@@ -962,8 +991,15 @@ eventFrame:SetScript("OnEvent", function()
   if event == "PLAYER_ENTERING_WORLD" then
     KittyDPSDB = CopyDefaults(defaults, KittyDPSDB or {})
     cfg = KittyDPSDB
-    catFormIdx    = GetCatFormIndex()
+    catFormIdx     = GetCatFormIndex()
     reshiftFormIdx = GetReshiftIndex()
+    -- Auto-detect Faerie Fire spell name from spellbook (handles server
+    -- naming differences: "Faerie Fire (Feral)", "Feral Faerie Fire", etc.)
+    local ffName, ffSlot = FindSpellByPartialName("Faerie Fire")
+    if ffName then
+      SPELL_FAERIE_FIRE = ffName
+      spellSlotCache[ffName] = ffSlot
+    end
     CreateMinimapButton()
     if not loaded then
       PrintStatus()
@@ -973,6 +1009,7 @@ eventFrame:SetScript("OnEvent", function()
     doclaw = 0
     bleedExpire.Rake = 0
     bleedExpire.Rip  = 0
+    ffCooldownUntil  = 0
   elseif event == "PLAYER_REGEN_ENABLED" then
     doclaw = 0
   elseif event == "UI_ERROR_MESSAGE" then
