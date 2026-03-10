@@ -62,8 +62,7 @@ local TEXTURE_BLOOD_FRENZY  = "Ability_Mount_JungleTiger"
 local TEXTURE_CLEARCASTING  = "Spell_Shadow_ManaBurn"
 local TEXTURE_FAERIE_FIRE   = "Spell_Nature_FaerieFire"
 -- Rake and Rip debuff textures — matched via strfind against the full icon path.
--- Run /kdps debug with both bleeds active on a target to verify these strings.
-local TEXTURE_RAKE          = "Ability_GhoulFrenzy"
+local TEXTURE_RAKE          = "Ability_Druid_Disembowel"
 local TEXTURE_RIP           = "Ability_GhoulFrenzy"
 
 -- Duration constants (seconds) for time-based bleed / debuff tracking.
