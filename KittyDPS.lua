@@ -52,7 +52,6 @@ local MSG_SHRED_HIT        = "Your Shred"
 local MSG_CLAW_HIT         = "Your Claw"
 local MSG_RAKE_HIT         = "Your Rake"
 local MSG_RIP_HIT          = "Your Rip"
-local MSG_FF_HIT           = "Your Faerie Fire"
 
 -- In vanilla 1.12, UnitBuff/UnitDebuff returns icon texture as first value,
 -- not the spell name. Player buffs are detected via GetPlayerBuff +
@@ -61,12 +60,13 @@ local MSG_FF_HIT           = "Your Faerie Fire"
 -- If a buff is never detected, verify the icon name in-game and update here.
 local TEXTURE_BLOOD_FRENZY  = "Ability_Mount_JungleTiger"
 local TEXTURE_CLEARCASTING  = "Spell_Shadow_ManaBurn"
+local TEXTURE_FAERIE_FIRE   = "Spell_Nature_FaerieFire"
 
 -- Duration constants (seconds) for time-based bleed / debuff tracking.
 -- Rake: 3 ticks × 3 s = 9 s. Rip: computed per combo points (2 + cp*2).
--- Faerie Fire (Feral): 40 s. FF cooldown: 3 min.
 local RAKE_DURATION = 9
-local FF_DURATION   = 40
+-- Faerie Fire spell cooldown (6 s). Used to avoid re-casting on the same
+-- GCD frame after SafeCast. Debuff presence is checked via UnitDebuff texture.
 local FF_COOLDOWN   = 6
 
 -- ============================================================
@@ -95,7 +95,6 @@ local reshiftFormIdx = nil
 -- Reset on PLAYER_TARGET_CHANGED so stale data never bleeds across targets.
 local bleedExpire = { Rake = 0, Rip = 0 }
 local lastRipCombo = 0   -- combo points used when Rip was last cast
-local ffExpireTime    = 0  -- when Faerie Fire debuff expires on current target
 local ffCooldownUntil = 0  -- when the FF spell cooldown expires (tracked locally)
 
 -- Spell slot cache: maps spell name → spellbook slot number.
@@ -241,6 +240,19 @@ local function PlayerBuffRemaining(buffName)
     i = i + 1
   end
   return nil
+end
+
+-- Check target debuffs by texture (vanilla 1.12: UnitDebuff returns texture
+-- as first value, not the spell name). Used for Faerie Fire detection.
+local function TargetHasDebuffTexture(texturePartial)
+  local i = 1
+  while true do
+    local tex = UnitDebuff("target", i)
+    if tex == nil then break end
+    if strfind(tex, texturePartial) then return true end
+    i = i + 1
+  end
+  return false
 end
 
 local function TargetHasDebuff(debuffName)
@@ -435,14 +447,15 @@ local function DoDPS()
     return
   end
 
-  -- 5. Faerie Fire (Feral) — time-based tracking.
-  -- FF is a debuff-only spell (zero damage), so CHAT_MSG_SPELL_SELF_DAMAGE
-  -- never fires for it. We track expire and cooldown directly on cast.
+  -- 5. Faerie Fire (Feral) — apply if target doesn't have the debuff.
+  -- UnitDebuff returns icon texture as first value in 1.12, so we match
+  -- by texture partial string (HolyShift approach). This naturally handles
+  -- target switches: new target won't have the debuff → FF gets reapplied.
+  -- ffCooldownUntil prevents re-casting on the same GCD after SafeCast.
   if cfg.useFaerieFire then
     local now = GetTime()
-    if now >= ffExpireTime and now >= ffCooldownUntil then
+    if now >= ffCooldownUntil and not TargetHasDebuffTexture(TEXTURE_FAERIE_FIRE) then
       SafeCast(SPELL_FAERIE_FIRE)
-      ffExpireTime    = now + FF_DURATION
       ffCooldownUntil = now + FF_COOLDOWN
       return
     end
@@ -960,9 +973,9 @@ eventFrame:SetScript("OnEvent", function()
     doclaw = 0
     bleedExpire.Rake = 0
     bleedExpire.Rip  = 0
-    ffExpireTime     = 0
-    -- ffCooldownUntil is NOT reset: FF has a real 3-min spell cooldown
-    -- that persists across target changes.
+    -- ffCooldownUntil is NOT reset on target change: the 6s spell CD persists.
+    -- FF debuff presence is checked live via UnitDebuff, so new targets get
+    -- FF applied automatically on the next /kdps dps press.
   elseif event == "PLAYER_REGEN_ENABLED" then
     doclaw = 0
   elseif event == "UI_ERROR_MESSAGE" then
@@ -984,8 +997,6 @@ eventFrame:SetScript("OnEvent", function()
         bleedExpire.Rake = GetTime() + RAKE_DURATION
       elseif strfind(arg1, MSG_RIP_HIT) then
         bleedExpire.Rip = GetTime() + (2 + lastRipCombo * 2)
-      elseif strfind(arg1, MSG_FF_HIT) then
-        ffExpireTime = GetTime() + FF_DURATION
       end
     end
   elseif event == "CHAT_MSG_SPELL_AURA_GONE_OTHER" then
