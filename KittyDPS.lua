@@ -159,10 +159,21 @@ end
 
 local function IsCatForm()
   -- GetShapeshiftFormInfo returns active as 1 or nil, not a boolean.
-  -- catFormIdx is cached at login — no form scan needed here.
-  if not catFormIdx then return false end
-  local _, _, active = GetShapeshiftFormInfo(catFormIdx)
-  return active == 1 or active == true
+  -- Lazy-init catFormIdx in case PLAYER_ENTERING_WORLD fired too early.
+  if not catFormIdx then catFormIdx = GetCatFormIndex() end
+  if catFormIdx then
+    local _, _, active = GetShapeshiftFormInfo(catFormIdx)
+    return active == 1 or active == true
+  end
+  -- Last resort: scan all forms directly.
+  for i = 1, GetNumShapeshiftForms() do
+    local _, name, active = GetShapeshiftFormInfo(i)
+    if name and strfind(name, SPELL_CAT_FORM) then
+      catFormIdx = i
+      return active == 1 or active == true
+    end
+  end
+  return false
 end
 
 local function PlayerEnergy()
@@ -551,6 +562,7 @@ local function CreateOptionsUI()
     tile     = true, tileSize = 32, edgeSize = 32,
     insets   = { left=11, right=12, top=12, bottom=11 },
   })
+  root:SetBackdropColor(0, 0, 0, 0.85)
   root:SetMovable(true)
   root:EnableMouse(true)
   root:RegisterForDrag("LeftButton")
@@ -580,11 +592,13 @@ local function CreateOptionsUI()
   local btn1 = CreateFrame("Button", "KittyDPS_TabBtn1", root, "UIPanelButtonTemplate")
   btn1:SetPoint("TOPLEFT", 16, -36)
   btn1:SetWidth(120)
+  btn1:SetHeight(22)
   btn1:SetText("Rotation")
 
   local btn2 = CreateFrame("Button", "KittyDPS_TabBtn2", root, "UIPanelButtonTemplate")
-  btn2:SetPoint("LEFT", btn1, "RIGHT", 4, 0)
+  btn2:SetPoint("TOPLEFT", btn1, "TOPRIGHT", 4, 0)
   btn2:SetWidth(140)
+  btn2:SetHeight(22)
   btn2:SetText("Energy Costs")
 
   local function SelectTab(id)
