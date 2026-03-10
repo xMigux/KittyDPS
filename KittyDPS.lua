@@ -61,13 +61,14 @@ local MSG_RIP_HIT          = "Your Rip"
 local TEXTURE_BLOOD_FRENZY  = "Ability_Mount_JungleTiger"
 local TEXTURE_CLEARCASTING  = "Spell_Shadow_ManaBurn"
 local TEXTURE_FAERIE_FIRE   = "Spell_Nature_FaerieFire"
+-- Rake and Rip debuff textures — matched via strfind against the full icon path.
+-- Run /kdps debug with both bleeds active on a target to verify these strings.
+local TEXTURE_RAKE          = "Ability_GhoulFrenzy"
+local TEXTURE_RIP           = "Ability_GhoulFrenzy"
 
 -- Duration constants (seconds) for time-based bleed / debuff tracking.
 -- Rake: 3 ticks × 3 s = 9 s. Rip: computed per combo points (2 + cp*2).
 local RAKE_DURATION = 9
--- Faerie Fire spell cooldown (6 s). Used to avoid re-casting on the same
--- GCD frame after SafeCast. Debuff presence is checked via UnitDebuff texture.
-local FF_COOLDOWN   = 6
 
 -- ============================================================
 -- Base energy costs (vanilla spell cost before any talents)
@@ -95,7 +96,6 @@ local reshiftFormIdx = nil
 -- Reset on PLAYER_TARGET_CHANGED so stale data never bleeds across targets.
 local bleedExpire = { Rake = 0, Rip = 0 }
 local lastRipCombo = 0   -- combo points used when Rip was last cast
-local ffCooldownUntil = 0  -- when the FF spell cooldown expires (tracked locally)
 
 -- Spell slot cache: maps spell name → spellbook slot number.
 -- Populated lazily on first lookup; spells never change slots mid-session.
@@ -428,8 +428,8 @@ local function DoDPS()
   -- higher-value option.
   if PlayerHasBuff(BUFF_CLEARCASTING) then
     local now       = GetTime()
-    local hasRakeCC = now < bleedExpire.Rake
-    local hasRipCC  = now < bleedExpire.Rip
+    local hasRakeCC = TargetHasDebuffTexture(TEXTURE_RAKE)
+    local hasRipCC  = TargetHasDebuffTexture(TEXTURE_RIP)
     local minCP = isBoss and cfg.minComboForBossFB or cfg.minComboForTrashFB
     if hasRakeCC and hasRipCC and combo >= minCP then
       SafeCast(SPELL_FEROCIOUS_BITE)
@@ -447,16 +447,14 @@ local function DoDPS()
     return
   end
 
-  -- 5. Faerie Fire (Feral) — apply if target doesn't have the debuff.
-  -- UnitDebuff returns icon texture as first value in 1.12, so we match
-  -- by texture partial string (HolyShift approach). This naturally handles
-  -- target switches: new target won't have the debuff → FF gets reapplied.
-  -- ffCooldownUntil prevents re-casting on the same GCD after SafeCast.
+  -- 5. Faerie Fire (Feral) — apply when not already on target.
+  -- Primary check: UnitDebuff texture (reapplies on target switch automatically).
+  -- Fallback: SpellOnCooldown in case the texture name doesn't match this server.
   if cfg.useFaerieFire then
     local now = GetTime()
-    if now >= ffCooldownUntil and not TargetHasDebuffTexture(TEXTURE_FAERIE_FIRE) then
+    local ffOnTarget = TargetHasDebuffTexture(TEXTURE_FAERIE_FIRE)
+    if not ffOnTarget and not SpellOnCooldown(SPELL_FAERIE_FIRE) then
       SafeCast(SPELL_FAERIE_FIRE)
-      ffCooldownUntil = now + FF_COOLDOWN
       return
     end
   end
@@ -476,7 +474,7 @@ local function DoDPS()
 
     -- 2. Rake — keep active so Open Wounds bonus is always up
     local now     = GetTime()
-    local hasRake = now < bleedExpire.Rake
+    local hasRake = TargetHasDebuffTexture(TEXTURE_RAKE)
     if not hasRake and energy >= CostRake() then
       SafeCast(SPELL_RAKE)
       return
@@ -486,7 +484,9 @@ local function DoDPS()
     -- On bosses, skip the refresh if combo points are already at the FB
     -- threshold: FB + Carnage will refresh Rip for free, so recasting it
     -- here would waste energy and a GCD.
-    local hasRip    = now < bleedExpire.Rip
+    -- Rip presence: live texture check. ripRemain uses time-based estimate
+    -- (populated from PERIODIC ticks since Rip has no initial damage hit).
+    local hasRip    = TargetHasDebuffTexture(TEXTURE_RIP)
     local ripRemain = math.max(0, bleedExpire.Rip - now)
 
     if isBoss then
@@ -956,6 +956,7 @@ eventFrame:RegisterEvent("PLAYER_TARGET_CHANGED")
 eventFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
 eventFrame:RegisterEvent("UI_ERROR_MESSAGE")
 eventFrame:RegisterEvent("CHAT_MSG_SPELL_SELF_DAMAGE")
+eventFrame:RegisterEvent("CHAT_MSG_SPELL_PERIODIC_SELF_DAMAGE")
 eventFrame:RegisterEvent("CHAT_MSG_SPELL_AURA_GONE_OTHER")
 
 eventFrame:SetScript("OnEvent", function()
@@ -973,9 +974,6 @@ eventFrame:SetScript("OnEvent", function()
     doclaw = 0
     bleedExpire.Rake = 0
     bleedExpire.Rip  = 0
-    -- ffCooldownUntil is NOT reset on target change: the 6s spell CD persists.
-    -- FF debuff presence is checked live via UnitDebuff, so new targets get
-    -- FF applied automatically on the next /kdps dps press.
   elseif event == "PLAYER_REGEN_ENABLED" then
     doclaw = 0
   elseif event == "UI_ERROR_MESSAGE" then
@@ -999,6 +997,14 @@ eventFrame:SetScript("OnEvent", function()
         bleedExpire.Rip = GetTime() + (2 + lastRipCombo * 2)
       end
     end
+  elseif event == "CHAT_MSG_SPELL_PERIODIC_SELF_DAMAGE" then
+    -- Rip has no initial damage hit, so SELF_DAMAGE never fires for it.
+    -- Use periodic ticks to keep the bleedExpire.Rip time estimate alive
+    -- for ripRemain calculations (refresh threshold logic).
+    -- Presence detection uses UnitDebuff texture, not this timer.
+    if arg1 and strfind(arg1, "Rip") then
+      bleedExpire.Rip = math.max(bleedExpire.Rip, GetTime() + 2)
+    end
   elseif event == "CHAT_MSG_SPELL_AURA_GONE_OTHER" then
     -- "Rake fades from X." / "Rip fades from X." — bleed fell off, reset timer.
     if arg1 then
@@ -1021,6 +1027,26 @@ SlashCmdList["KITTYDPS"] = function(msg)
 
   if msg == "dps" then
     DoDPS()
+    return
+  end
+
+  if msg == "debug" then
+    if not UnitExists("target") then
+      KPrint("|cffffa500KittyDPS debug:|r no target")
+      return
+    end
+    KPrint("|cffffa500KittyDPS debug — target debuffs:|r")
+    local i = 1
+    while true do
+      local tex = UnitDebuff("target", i)
+      if tex == nil then break end
+      KPrint(string.format("  [%d] %s", i, tostring(tex)))
+      i = i + 1
+    end
+    KPrint(string.format("  FF check: %s | Rake check: %s | Rip check: %s",
+      tostring(TargetHasDebuffTexture(TEXTURE_FAERIE_FIRE)),
+      tostring(TargetHasDebuffTexture(TEXTURE_RAKE)),
+      tostring(TargetHasDebuffTexture(TEXTURE_RIP))))
     return
   end
 
