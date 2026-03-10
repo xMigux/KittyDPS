@@ -64,9 +64,10 @@ local TEXTURE_CLEARCASTING  = "Spell_Shadow_ManaBurn"
 
 -- Duration constants (seconds) for time-based bleed / debuff tracking.
 -- Rake: 3 ticks × 3 s = 9 s. Rip: computed per combo points (2 + cp*2).
--- Faerie Fire (Feral): 40 s.
+-- Faerie Fire (Feral): 40 s. FF cooldown: 3 min.
 local RAKE_DURATION = 9
 local FF_DURATION   = 40
+local FF_COOLDOWN   = 6
 
 -- ============================================================
 -- Base energy costs (vanilla spell cost before any talents)
@@ -94,7 +95,8 @@ local reshiftFormIdx = nil
 -- Reset on PLAYER_TARGET_CHANGED so stale data never bleeds across targets.
 local bleedExpire = { Rake = 0, Rip = 0 }
 local lastRipCombo = 0   -- combo points used when Rip was last cast
-local ffExpireTime = 0   -- when Faerie Fire debuff expires on current target
+local ffExpireTime    = 0  -- when Faerie Fire debuff expires on current target
+local ffCooldownUntil = 0  -- when the FF spell cooldown expires (tracked locally)
 
 -- Spell slot cache: maps spell name → spellbook slot number.
 -- Populated lazily on first lookup; spells never change slots mid-session.
@@ -433,10 +435,15 @@ local function DoDPS()
     return
   end
 
-  -- 5. Faerie Fire (Feral) — time-based: apply when our tracked debuff expired.
-  if cfg.useFaerieFire and not SpellOnCooldown(SPELL_FAERIE_FIRE) then
-    if GetTime() >= ffExpireTime then
+  -- 5. Faerie Fire (Feral) — time-based tracking.
+  -- FF is a debuff-only spell (zero damage), so CHAT_MSG_SPELL_SELF_DAMAGE
+  -- never fires for it. We track expire and cooldown directly on cast.
+  if cfg.useFaerieFire then
+    local now = GetTime()
+    if now >= ffExpireTime and now >= ffCooldownUntil then
       SafeCast(SPELL_FAERIE_FIRE)
+      ffExpireTime    = now + FF_DURATION
+      ffCooldownUntil = now + FF_COOLDOWN
       return
     end
   end
@@ -742,7 +749,7 @@ local function CreateOptionsUI()
     function() return cfg.minEnergyForFB end,
     function(v) cfg.minEnergyForFB = v ; KittyDPSDB.minEnergyForFB = v end)
 
-  RS("KittyDPS_Sl_RipT",  "Rip refresh threshold (secs)",   1, 6,   1, -80,
+  RS("KittyDPS_Sl_RipT",  "Rip refresh threshold (secs)",   0, 6,   1, -80,
     function() return cfg.ripRefreshThreshold end,
     function(v) cfg.ripRefreshThreshold = v ; KittyDPSDB.ripRefreshThreshold = v end)
 
@@ -936,7 +943,6 @@ eventFrame:RegisterEvent("PLAYER_TARGET_CHANGED")
 eventFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
 eventFrame:RegisterEvent("UI_ERROR_MESSAGE")
 eventFrame:RegisterEvent("CHAT_MSG_SPELL_SELF_DAMAGE")
-eventFrame:RegisterEvent("CHAT_MSG_SPELL_PERIODIC_SELF_DAMAGE")
 eventFrame:RegisterEvent("CHAT_MSG_SPELL_AURA_GONE_OTHER")
 
 eventFrame:SetScript("OnEvent", function()
@@ -955,6 +961,8 @@ eventFrame:SetScript("OnEvent", function()
     bleedExpire.Rake = 0
     bleedExpire.Rip  = 0
     ffExpireTime     = 0
+    -- ffCooldownUntil is NOT reset: FF has a real 3-min spell cooldown
+    -- that persists across target changes.
   elseif event == "PLAYER_REGEN_ENABLED" then
     doclaw = 0
   elseif event == "UI_ERROR_MESSAGE" then
@@ -987,16 +995,6 @@ eventFrame:SetScript("OnEvent", function()
         bleedExpire.Rake = 0
       elseif strfind(arg1, "Rip") then
         bleedExpire.Rip = 0
-      end
-    end
-  elseif event == "CHAT_MSG_SPELL_PERIODIC_SELF_DAMAGE" then
-    -- DoT ticks confirm the bleed is still active; extend our timer
-    -- by one extra tick interval so we never see a false "expired" gap.
-    if arg1 then
-      if strfind(arg1, "Rake") then
-        bleedExpire.Rake = math.max(bleedExpire.Rake, GetTime() + 3.5)
-      elseif strfind(arg1, "Rip") then
-        bleedExpire.Rip = math.max(bleedExpire.Rip, GetTime() + 3)
       end
     end
   end
