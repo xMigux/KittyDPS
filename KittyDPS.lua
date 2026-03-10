@@ -37,10 +37,9 @@ local SPELL_CLAW           = "Claw"
 local SPELL_SHRED          = "Shred"
 local SPELL_FEROCIOUS_BITE = "Ferocious Bite"
 local SPELL_TIGERS_FURY    = "Tiger's Fury"
--- Populated at PLAYER_ENTERING_WORLD by scanning the spellbook for any
--- spell whose name contains "Faerie Fire". Handles server-specific naming
--- ("Faerie Fire (Feral)", "Feral Faerie Fire", etc.) automatically.
-local SPELL_FAERIE_FIRE    = "Faerie Fire (Feral)"
+-- Full name including rank required by CastSpellByName on this server.
+-- Overridden at PLAYER_ENTERING_WORLD if the spellbook scan finds a match.
+local SPELL_FAERIE_FIRE    = "Faerie Fire (Feral)(Rank 4)"
 local SPELL_RESHIFT        = "Reshift"
 local BUFF_BLOOD_FRENZY    = "Blood Frenzy"
 -- NOTE: Blood Frenzy talent enhances Tiger's Fury. The attack-speed buff may be
