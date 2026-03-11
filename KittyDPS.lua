@@ -636,6 +636,8 @@ local function CreateCB(name, parent, label, anchorFrame, offsetY, getter, sette
   end
   local textFS = cb:CreateFontString(nil, "ARTWORK", "GameFontNormal")
   textFS:SetPoint("LEFT", cb, "RIGHT", 4, 0)
+  textFS:SetWidth(230)
+  textFS:SetJustifyH("LEFT")
   textFS:SetText(label)
   cb:SetChecked(getter())
   cb:SetScript("OnClick", function()
