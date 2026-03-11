@@ -105,6 +105,7 @@ KittyDPS executes one rotation step per key press — it is not an automation to
 |---|---|
 | `/kdps dps` | Execute one rotation step |
 | `/kdps cfg` | Open the options panel |
+| `/kdps debug` | List all debuff textures on the current target (for troubleshooting) |
 | `/kdps` | Print current state and command list |
 
 ---
@@ -113,32 +114,44 @@ KittyDPS executes one rotation step per key press — it is not an automation to
 
 ### When the target CAN bleed
 
-Priority order:
+Priority order per key press:
 
-1. **Omen of Clarity (Clearcasting)**
-   When active, immediately uses the highest-value free spell: FB (if bleeds + CP ready) or Shred.
+1. **Cat Form** — shift in if needed.
 
-2. **Max-energy Ferocious Bite** *(if enabled)*
-   Fires FB early when Rake or Rip will expire soon (≤ X seconds) or energy is about to cap (≥ Y).
-   Has higher priority than reapplying bleeds — with 5 CP, a Carnage proc will likely refresh the expiring bleed anyway.
+2. **Omen of Clarity (Clearcasting)**
+   When active, immediately uses the highest-value free spell: FB (if bleeds + CP ready),
+   Shred (if behind target), or Rake/Claw.
 
-3. **Tiger's Fury**  
-   Used whenever the Blood Frenzy buff is not active and energy/position conditions are met.
+3. **Tiger's Fury (pre-pull)**
+   Out of combat: TF fires **before** Faerie Fire so the attack-speed buff is up before
+   combat is triggered.
 
-4. **Rake**
-   Reapplied whenever it falls off.
+4. **Faerie Fire (Feral)**
+   Applied whenever the target does not already have the debuff. Reapplied automatically
+   on target switch.
 
-5. **Rip**
-   Applied or refreshed when it has fewer than the configured seconds remaining.
+5. **Tiger's Fury (in combat)**
+   Fires whenever Blood Frenzy buff is not active (or has ≤ 5 s remaining) and energy
+   conditions are met.
 
-6. **Ferocious Bite (standard)**
-   Used with both bleeds active at the configured combo point threshold (default 5 on bosses).
+6. **Ferocious Bite** *(priority finisher)*
+   Fires **before** Rake when Rip is active and CP is at the FB threshold (default 5 on bosses,
+   configurable on trash). At 5 CP Carnage guarantees a refresh of both bleeds — spending
+   combo points here is always correct even if Rake has just fallen off.
 
-7. **Reshift** *(if enabled and Blood Frenzy is NOT active)*
+7. **Rake**
+   Reapplied whenever it falls off — **skipped at max CP (5)**. At 5 CP, use Rip or FB
+   instead; Carnage will refresh Rake on the next FB.
+
+8. **Rip**
+   Applied or refreshed (on bosses) when remaining duration falls below the configured
+   threshold.
+
+9. **Reshift** *(if enabled and Blood Frenzy is NOT active)*
    Fires when energy is very low and mana is sufficient.
 
-8. **Claw filler**
-   Default combo point builder when nothing else takes priority.
+10. **Claw filler**
+    Default combo point builder when nothing else takes priority.
 
 ### When the target is BLEED IMMUNE
 
@@ -172,7 +185,7 @@ Open with `/kdps cfg` or via the minimap button.
 |---|---|---|
 | Min energy for FB | 35 | FB only fires at this energy or above |
 | Rip refresh threshold | 3 s | Refresh Rip on bosses when this many seconds remain (skipped if CPs are at the FB threshold — Carnage handles the refresh) |
-| Min CP for Rip (boss) | 4 | Minimum combo points to cast Rip on bosses |
+| Min CP for Rip (boss) | 5 | Minimum combo points to cast Rip on bosses |
 | Min CP for Rip (trash) | 3 | Minimum combo points to cast Rip on non-elite targets |
 | Min CP for FB (boss) | 5 | Minimum combo points for Ferocious Bite on bosses |
 | Min CP for FB (trash) | 3 | Minimum combo points for Ferocious Bite on non-elite targets |
@@ -202,6 +215,7 @@ its base cost by design. Control its behaviour via *Min energy for FB* on the Ro
 ## Minimap Button
 
 - **Left-click:** Open the options panel.
+- **Right-drag:** Move the button around the minimap edge.
 - **Tooltip:** Shows addon name and `/kdps dps` usage reminder.
 
 ---
@@ -220,7 +234,7 @@ local SPELL_CLAW           = "Claw"
 local SPELL_SHRED          = "Shred"
 local SPELL_FEROCIOUS_BITE = "Ferocious Bite"
 local SPELL_TIGERS_FURY    = "Tiger's Fury"
-local SPELL_FAERIE_FIRE    = "Faerie Fire (Feral)"
+local SPELL_FAERIE_FIRE    = "Faerie Fire (Feral)(Rank 4)"
 local SPELL_RESHIFT        = "Reshift"
 local BUFF_BLOOD_FRENZY    = "Blood Frenzy"
 local ERR_NOT_BEHIND       = "You must be behind"
