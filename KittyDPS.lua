@@ -753,14 +753,14 @@ local function CreateOptionsUI()
     function(v) cfg.useFaerieFire = v ; KittyDPSDB.useFaerieFire = v end)
 
   local cbTF = CreateCB("KittyDPS_CB_TF", tab1,
-    "Use Tiger's Fury / Blood Frenzy — never fires while buff is active",
+    "Use Tiger's Fury / Blood Frenzy\n— never fires while buff is active",
     cbFF, -8,
     function() return cfg.useTigersFury end,
     function(v) cfg.useTigersFury = v ; KittyDPSDB.useTigersFury = v end)
 
   local cbFBT = CreateCB("KittyDPS_CB_FBTrash", tab1,
     "Ferocious Bite on trash (requires Rake + Rip active)",
-    cbTF, -8,
+    cbTF, -22,
     function() return cfg.useFerociousBiteOnTrash end,
     function(v) cfg.useFerociousBiteOnTrash = v ; KittyDPSDB.useFerociousBiteOnTrash = v end)
 
@@ -769,17 +769,17 @@ local function CreateOptionsUI()
   secBld:SetText("|cffecd226Bleeds & Immunity")
 
   local cbBI = CreateCB("KittyDPS_CB_BleedImm", tab1,
-    "Skip bleeds on immune targets (Undead / Elemental / Mechanical / Totem)",
+    "Skip bleeds on immune targets\n(Undead / Elemental / Mechanical / Totem)",
     secBld, -10,
     function() return cfg.autoDetectBleedImmune end,
     function(v) cfg.autoDetectBleedImmune = v ; KittyDPSDB.autoDetectBleedImmune = v end)
 
   local secPS = tab1:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-  secPS:SetPoint("TOPLEFT", cbBI, "BOTTOMLEFT", 0, -16)
+  secPS:SetPoint("TOPLEFT", cbBI, "BOTTOMLEFT", 0, -30)
   secPS:SetText("|cffecd226Powershift (Reshift)")
 
   local cbPS = CreateCB("KittyDPS_CB_PS", tab1,
-    "Auto-Reshift when energy is low — never fires during Blood Frenzy",
+    "Auto-Reshift when energy is low\n— never fires during Blood Frenzy",
     secPS, -10,
     function() return cfg.usePowershift end,
     function(v) cfg.usePowershift = v ; KittyDPSDB.usePowershift = v end)
