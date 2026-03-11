@@ -58,7 +58,6 @@ toggle off the features you don't use via `/kdps cfg`.
   A dedicated options tab lets you override the energy cost the addon assumes for each
   ability to match your actual setup (idols, talents). Examples:
   - Idol of Ferocity: Claw −3
-  - Idol of Brutality: Claw −10
 
 - **Auto-target, Faerie Fire, and minimap button**
 
