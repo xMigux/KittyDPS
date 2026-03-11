@@ -674,9 +674,9 @@ local function CreateOptionsUI()
   root:SetHeight(580)
   root:SetPoint("CENTER", UIParent, "CENTER")
   root:SetBackdrop({
-    bgFile   = "Interface\\DialogFrame\\UI-DialogBox-Background",
+    bgFile   = "Interface\\ChatFrame\\ChatFrameBackground",
     edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
-    tile     = true, tileSize = 32, edgeSize = 32,
+    tile     = true, tileSize = 16, edgeSize = 32,
     insets   = { left=11, right=12, top=12, bottom=11 },
   })
   root:SetBackdropColor(0, 0, 0, 0.95)
