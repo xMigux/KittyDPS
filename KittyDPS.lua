@@ -679,7 +679,7 @@ local function CreateOptionsUI()
     tile     = true, tileSize = 32, edgeSize = 32,
     insets   = { left=11, right=12, top=12, bottom=11 },
   })
-  root:SetBackdropColor(0, 0, 0, 0.85)
+  root:SetBackdropColor(0, 0, 0, 0.92)
   root:SetMovable(true)
   root:EnableMouse(true)
   root:RegisterForDrag("LeftButton")
@@ -909,9 +909,20 @@ local function CreateMinimapButton()
   btn:SetWidth(32)
   btn:SetHeight(32)
   btn:SetFrameStrata("MEDIUM")
-  btn:SetNormalTexture("Interface\\Icons\\Ability_Druid_CatForm")
-  btn:SetPushedTexture("Interface\\Icons\\Ability_Druid_CatForm")
-  btn:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
+  -- Icon as ARTWORK layer, slightly inset so the circular border covers corners.
+  local btnIcon = btn:CreateTexture(nil, "ARTWORK")
+  btnIcon:SetTexture("Interface\\Icons\\Ability_Druid_CatForm")
+  btnIcon:SetWidth(22)
+  btnIcon:SetHeight(22)
+  btnIcon:SetPoint("CENTER")
+  -- Circular border overlay — MiniMap-TrackingBorder is the same circular
+  -- frame used by all standard minimap buttons.
+  local btnBorder = btn:CreateTexture(nil, "OVERLAY")
+  btnBorder:SetTexture("Interface\\Minimap\\MiniMap-TrackingBorder")
+  btnBorder:SetWidth(56)
+  btnBorder:SetHeight(56)
+  btnBorder:SetPoint("CENTER")
+  btn:SetHighlightTexture("Interface\\Minimap\\MiniMap-TrackingBorder", "ADD")
   btn:RegisterForDrag("RightButton")
 
   btn:SetScript("OnClick", function()
