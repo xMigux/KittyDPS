@@ -755,7 +755,7 @@ local function CreateOptionsUI()
     function(v) cfg.useFaerieFire = v ; KittyDPSDB.useFaerieFire = v end)
 
   local cbTF = CreateCB("KittyDPS_CB_TF", tab1,
-    "Use Tiger's Fury / Blood Frenzy\n— never fires while buff is active",
+    "Use Tiger's Fury / Blood Frenzy\n(never fires while buff is active)",
     cbFF, -8,
     function() return cfg.useTigersFury end,
     function(v) cfg.useTigersFury = v ; KittyDPSDB.useTigersFury = v end)
@@ -781,7 +781,7 @@ local function CreateOptionsUI()
   secPS:SetText("|cffecd226Powershift (Reshift)")
 
   local cbPS = CreateCB("KittyDPS_CB_PS", tab1,
-    "Auto-Reshift when energy is low\n— never fires during Blood Frenzy",
+    "Auto-Reshift when energy is low\n(never fires during Blood Frenzy)",
     secPS, -10,
     function() return cfg.usePowershift end,
     function(v) cfg.usePowershift = v ; KittyDPSDB.usePowershift = v end)
@@ -851,7 +851,7 @@ local function CreateOptionsUI()
   costSub:SetJustifyH("LEFT")
   costSub:SetText(
     "Override the energy cost the rotation assumes for each spell.\n" ..
-    "Examples: Idol of Ferocity  -3 Claw  |  Idol of Brutality  -10 Claw.\n" ..
+    "Example: Idol of Ferocity  -3 Claw.\n" ..
     "Ferocious Bite has no entry here — use 'Min energy for FB' on the Rotation tab."
   )
 
