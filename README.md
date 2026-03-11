@@ -184,13 +184,13 @@ Open with `/kdps cfg` or via the minimap button.
 | Slider | Default | Description |
 |---|---|---|
 | Min energy for FB | 35 | FB only fires at this energy or above |
-| Rip refresh threshold | 3 s | Refresh Rip on bosses when this many seconds remain (skipped if CPs are at the FB threshold — Carnage handles the refresh) |
+| Rip refresh threshold | 0 s | Refresh Rip on bosses when this many seconds remain. At 0 only recasts if Rip is not active (Carnage at 5 CP handles refreshes) |
 | Min CP for Rip (boss) | 5 | Minimum combo points to cast Rip on bosses |
 | Min CP for Rip (trash) | 3 | Minimum combo points to cast Rip on non-elite targets |
 | Min CP for FB (boss) | 5 | Minimum combo points for Ferocious Bite on bosses |
 | Min CP for FB (trash) | 3 | Minimum combo points for Ferocious Bite on non-elite targets |
 | Max energy to trigger Reshift | 20 | Reshift fires when energy ≤ this value |
-| Min mana for Reshift | 231 | Reshift only fires when mana ≥ this value |
+| Min mana for Reshift | 350 | Reshift only fires when mana ≥ this value |
 
 ---
 
@@ -203,7 +203,7 @@ Adjust further if you use idols or have different talent ranks.
 | Ability | Default | Example further reduction |
 |---|---|---|
 | Rake | 31 | Ferocity 4/5 already applied |
-| Claw | 36 | Idol of Ferocity −3, Idol of Brutality −10 |
+| Claw | 36 | Idol of Ferocity −3 |
 | Rip | 30 | — |
 | Shred | 48 | Improved Shred 2/2 already applied |
 

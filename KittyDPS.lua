@@ -148,7 +148,7 @@ end
 -- ============================================================
 local defaults = {
   minEnergyForFB              = 35,
-  ripRefreshThreshold         = 3,
+  ripRefreshThreshold         = 0,
   minComboForRipBoss          = 5,
   minComboForRipTrash         = 3,
   minComboForBossFB           = 5,
@@ -160,7 +160,7 @@ local defaults = {
   autoDetectBleedImmune       = true,
   usePowershift               = false,
   powershiftEnergyThreshold   = 20,
-  powershiftMana              = 231,
+  powershiftMana              = 350,
   costRake                    = 31,   -- 35 - 4 (Ferocity 4/5)
   costClaw                    = 36,   -- 40 - 4 (Ferocity 4/5)
   costRip                     = 30,   -- unchanged (Ferocity does not affect Rip)
@@ -679,7 +679,7 @@ local function CreateOptionsUI()
     tile     = true, tileSize = 32, edgeSize = 32,
     insets   = { left=11, right=12, top=12, bottom=11 },
   })
-  root:SetBackdropColor(0, 0, 0, 0.92)
+  root:SetBackdropColor(0, 0, 0, 0.95)
   root:SetMovable(true)
   root:EnableMouse(true)
   root:RegisterForDrag("LeftButton")
@@ -909,19 +909,21 @@ local function CreateMinimapButton()
   btn:SetWidth(32)
   btn:SetHeight(32)
   btn:SetFrameStrata("MEDIUM")
-  -- Circular border first (OVERLAY layer, drawn first so icon renders on top).
+  -- Icon in BACKGROUND layer (pfQuest pattern): 20x20 with slight UV crop
+  -- so the icon corners don't poke out from under the circular border.
+  local btnIcon = btn:CreateTexture(nil, "BACKGROUND")
+  btnIcon:SetTexture("Interface\\Icons\\Ability_Druid_CatForm")
+  btnIcon:SetWidth(20)
+  btnIcon:SetHeight(20)
+  btnIcon:SetTexCoord(0.05, 0.95, 0.05, 0.95)
+  btnIcon:SetPoint("CENTER", btn, "CENTER", 1, -1)
+  -- Circular border in OVERLAY layer anchored to TOPLEFT (pfQuest pattern).
   local btnBorder = btn:CreateTexture(nil, "OVERLAY")
   btnBorder:SetTexture("Interface\\Minimap\\MiniMap-TrackingBorder")
-  btnBorder:SetWidth(56)
-  btnBorder:SetHeight(56)
-  btnBorder:SetPoint("CENTER", btn, "CENTER", 0, 0)
-  -- Icon on top of border (also OVERLAY, created after → higher draw order).
-  local btnIcon = btn:CreateTexture(nil, "OVERLAY")
-  btnIcon:SetTexture("Interface\\Icons\\Ability_Druid_CatForm")
-  btnIcon:SetWidth(22)
-  btnIcon:SetHeight(22)
-  btnIcon:SetPoint("CENTER", btn, "CENTER", 0, 0)
-  btn:SetHighlightTexture("Interface\\Minimap\\MiniMap-TrackingBorder", "ADD")
+  btnBorder:SetWidth(53)
+  btnBorder:SetHeight(53)
+  btnBorder:SetPoint("TOPLEFT", btn, "TOPLEFT", 0, 0)
+  btn:SetHighlightTexture("Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight")
   btn:RegisterForDrag("RightButton")
 
   btn:SetScript("OnClick", function()
