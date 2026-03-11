@@ -679,7 +679,7 @@ local function CreateOptionsUI()
     tile     = true, tileSize = 16, edgeSize = 32,
     insets   = { left=11, right=12, top=12, bottom=11 },
   })
-  root:SetBackdropColor(0, 0, 0, 0.95)
+  root:SetBackdropColor(0, 0, 0, 0.85)
   root:SetMovable(true)
   root:EnableMouse(true)
   root:RegisterForDrag("LeftButton")
